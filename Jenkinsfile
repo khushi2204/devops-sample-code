@@ -2,51 +2,49 @@ pipeline {
     agent any
 
     stages {
-        stage('Build') {
-            steps {
-                echo 'Creating virtual environment and installing dependencies...'
-            }
-        }
-        stage('Test') {
-            steps {
-                echo 'Running tests...'
-                sh 'python3 -m unittest discover -s .'
-            }
-        }
-        stage('Deploy') {
-            steps {
-                echo 'Deploying application...'
-                sh '''
-                mkdir -p ${WORKSPACE}/python-app-deploy
-                cp ${WORKSPACE}/app.py ${WORKSPACE}/python-app-deploy/
-                '''
-            }
-        }
-        stage('Run Application') {
-            steps {
-                echo 'Running application...'
-                sh '''
-                nohup python3 ${WORKSPACE}/python-app-deploy/app.py > ${WORKSPACE}/python-app-deploy/app.log 2>&1 &
-                echo $! > ${WORKSPACE}/python-app-deploy/app.pid
-                '''
-            }
-        }
-        stage('Test Application') {
-            steps {
-                echo 'Testing application...'
-                sh '''
-                python3 ${WORKSPACE}/test_app.py
-                '''
-            }
-        }
-    }
 
-    post {
-        success {
-            echo 'Pipeline completed successfully!'
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/<your-username>/<your-repo>.git'
+            }
         }
-        failure {
-            echo 'Pipeline failed. Check the logs for more details.'
+
+        stage('Setup Python Env') {
+            steps {
+                bat '''
+                python -m venv venv
+                venv\\Scripts\\activate
+                pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                bat '''
+                venv\\Scripts\\activate
+                pytest
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                bat '''
+                docker build -t flask-app .
+                '''
+            }
+        }
+
+        stage('Run Container') {
+            steps {
+                bat '''
+                docker stop flask-app
+                docker rm flask-app
+                docker run -d -p 5000:5000 --name flask-app flask-app
+                '''
+            }
         }
     }
 }
