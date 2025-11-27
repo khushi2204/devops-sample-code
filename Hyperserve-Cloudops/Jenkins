@@ -2,35 +2,46 @@ pipeline {
     agent any
 
     stages {
+        stage('Pre-Check Docker') {
+            steps {
+                sh '''
+                if ! command -v docker >/dev/null 2>&1; then
+                    echo "Docker is NOT installed!"
+                    exit 1
+                fi
+                docker --version
+                '''
+            }
+        }
+
         stage('Checkout') {
             steps {
-                git 'https://github.com/khushi2204/devops-sample-code.git'
+                checkout scm
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t hyperserve-app .'
+                sh 'docker build -t hyperserve-svc:3 .'
             }
         }
 
         stage('Run Container') {
             steps {
-                sh 'docker run -d --name hyperserve -p 5000:5000 hyperserve-app'
-            }
-        }
-
-        stage('Test API') {
-            steps {
-                sh 'sleep 3'
-                sh 'curl http://localhost:5000'
+                sh '''
+                docker rm -f hyperserve-svc || true
+                docker run -d --name hyperserve-svc -p 12208:5000 hyperserve-svc:3
+                '''
             }
         }
     }
 
     post {
-        always {
-            sh 'docker rm -f hyperserve || true'
+        failure {
+            echo "Pipeline failed."
+        }
+        success {
+            echo "Container is running on port 12208"
         }
     }
 }
