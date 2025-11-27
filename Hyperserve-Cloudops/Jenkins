@@ -1,20 +1,29 @@
 pipeline {
     agent any
 
+    environment {
+        IMAGE_NAME = "hyperserve-svc"
+        IMAGE_TAG  = "v${BUILD_NUMBER}"
+    }
+
     stages {
-        stage('Pre-Check Docker') {
+
+        stage('Check Docker Availability') {
             steps {
                 sh '''
+                echo "Checking if Docker is installed..."
                 if ! command -v docker >/dev/null 2>&1; then
-                    echo "Docker is NOT installed!"
+                    echo "❌ Docker command not found"
                     exit 1
                 fi
+                
+                echo "Docker is installed:"
                 docker --version
                 '''
             }
         }
 
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
                 checkout scm
             }
@@ -22,26 +31,42 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t hyperserve-svc:3 .'
+                sh '''
+                echo "Building Docker image..."
+                docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                '''
             }
         }
 
-        stage('Run Container') {
+        stage('Stop Old Container') {
             steps {
                 sh '''
-                docker rm -f hyperserve-svc || true
-                docker run -d --name hyperserve-svc -p 12208:5000 hyperserve-svc:3
+                echo "Stopping old container if running..."
+                docker rm -f ${IMAGE_NAME} || true
+                '''
+            }
+        }
+
+        stage('Run New Container') {
+            steps {
+                sh '''
+                echo "Running new container..."
+                docker run -d \
+                    --name ${IMAGE_NAME} \
+                    -p 12208:5000 \
+                    ${IMAGE_NAME}:${IMAGE_TAG}
                 '''
             }
         }
     }
 
     post {
-        failure {
-            echo "Pipeline failed."
-        }
         success {
-            echo "Container is running on port 12208"
+            echo "✅ Pipeline completed successfully!"
+            echo "Service is running on: http://localhost:12208"
+        }
+        failure {
+            echo "❌ Pipeline failed. Check logs."
         }
     }
 }
