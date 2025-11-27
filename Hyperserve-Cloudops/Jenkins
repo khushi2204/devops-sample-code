@@ -1,0 +1,99 @@
+pipeline {
+  agent any
+
+  environment {
+    IMAGE = "hyperserve-svc:3"
+    CONTAINER_NAME = "hyperserve-svc"
+    HOST_PORT = "12208"
+    CONTAINER_PORT = "5000"
+  }
+
+  stages {
+    stage('Pre-check Docker') {
+      steps {
+        script {
+          // Clear, explicit check for Docker presence and ability to use it
+          sh '''
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "ERROR: docker CLI not found on PATH. Aborting."
+              exit 2
+            fi
+
+            # Check docker daemon access
+            if ! docker info >/dev/null 2>&1; then
+              echo "ERROR: docker daemon not accessible. Ensure Docker is running and Jenkins has permission."
+              exit 3
+            fi
+
+            echo "Docker pre-check OK"
+          '''
+        }
+      }
+    }
+
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Build image') {
+      steps {
+        sh '''
+          docker build -t ${IMAGE} .
+        '''
+      }
+    }
+
+    stage('Stop & remove old container (if exists)') {
+      steps {
+        sh '''
+          # stop and remove existing container if present (don't fail if absent)
+          if docker ps -a --format '{{.Names}}' | grep -w ${CONTAINER_NAME}; then
+            docker rm -f ${CONTAINER_NAME} || true
+          fi
+        '''
+      }
+    }
+
+    stage('Run container') {
+      steps {
+        sh '''
+          docker run -d --name ${CONTAINER_NAME} -p ${HOST_PORT}:${CONTAINER_PORT} ${IMAGE}
+        '''
+      }
+    }
+
+    stage('Health check') {
+      steps {
+        // Wait a little then check the endpoint from the Jenkins node
+        sh '''
+          echo "Waiting for service to start..."
+          retries=0
+          until curl -s -f http://localhost:${HOST_PORT}/ || [ $retries -ge 12 ]; do
+            sleep 1
+            retries=$((retries+1))
+            echo "retry $retries..."
+          done
+
+          if [ $retries -ge 12 ]; then
+            echo "ERROR: Service did not respond on port ${HOST_PORT}"
+            docker logs ${CONTAINER_NAME} || true
+            exit 4
+          fi
+
+          echo "Service responding on port ${HOST_PORT}"
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Pipeline finished: image ${IMAGE} built and container ${CONTAINER_NAME} running on host port ${HOST_PORT}"
+    }
+    failure {
+      echo "Pipeline failed — see console output above for details."
+    }
+  }
+}
